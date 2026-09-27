@@ -32,6 +32,10 @@ android.externalNativeBuild.cmake.path = file("src/main/jni/CMakeLists.txt")
 // Should match cmake_minimum_required.
 android.externalNativeBuild.cmake.version = "3.21.0+"
 
+val ndkDirectoryProvider = androidComponents.sdkComponents.ndkDirectory
+val srcMainDir = project.file("src/main")
+val jniDir = project.file("src/main/jni")
+val libsDir = jniDir.resolve("ffmpeg/android-libs")
 val assembleFfmpeg =
     tasks.register<Exec>("assembleFfmpeg") {
         description = "Assemble FFmpeg library"
@@ -44,17 +48,14 @@ val assembleFfmpeg =
                         "Building with Windows is not supported. Please use WSL or a unix-based operating system."
                     )
             }
-
-        val jniDir = project.file("src/main/jni")
-        val libsDir = jniDir.resolve("ffmpeg/android-libs")
         doFirst {
             if (libsDir.exists()) {
                 commandLine("true")
             } else {
-                val ndkDir = androidComponents.sdkComponents.ndkDirectory.get().asFile
+                val ndkDir = ndkDirectoryProvider.get().asFile
                 commandLine(
                     jniDir.resolve("build_ffmpeg.sh"),
-                    project.file("src/main"),
+                    srcMainDir,
                     ndkDir,
                     host,
                     "23",
