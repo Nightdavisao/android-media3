@@ -32,7 +32,6 @@ android.externalNativeBuild.cmake.path = file("src/main/jni/CMakeLists.txt")
 // Should match cmake_minimum_required.
 android.externalNativeBuild.cmake.version = "3.21.0+"
 
-val ndkDirectoryProvider = androidComponents.sdkComponents.ndkDirectory
 val assembleFfmpeg =
     tasks.register<Exec>("assembleFfmpeg") {
         description = "Assemble FFmpeg library"
@@ -46,6 +45,7 @@ val assembleFfmpeg =
                     )
             }
 
+		val ndkDirectoryProvider = androidComponents.sdkComponents.ndkDirectory
 		val srcMainDir = project.file("src/main")
 		val jniDir = project.file("src/main/jni")
 		val libsDir = jniDir.resolve("ffmpeg/android-libs")
