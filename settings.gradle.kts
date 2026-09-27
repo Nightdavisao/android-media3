@@ -23,9 +23,11 @@ pluginManagement {
   }
 }
 
-plugins { id("gradlebuild.media3-settings-logic") }
+plugins { id("gradlebuild.media3-settings-logic")
+	id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
+}
 
-rootProject.name = "androidx.media3"
+rootProject.name = "androidx-media3"
 
 Media3Modules.EXTERNAL_MODULES.forEach { (gradleName, moduleInfo) ->
   if (moduleInfo.includeInCompositeBuild || gradle.parent == null) {

@@ -57,7 +57,8 @@ val assembleFfmpeg =
                     project.file("src/main"),
                     ndkDir,
                     host,
-                    "21",
+                    "23",
+					"ape",
                     "flac",
                     "alac",
                 )
@@ -81,5 +82,5 @@ dependencies {
     implementation(project(":lib-decoder"))
     // TODO(b/203752526): Remove this dependency.
     implementation(project(":lib-exoplayer"))
-    implementation(libs.androidx.annotation)
+	implementation(libs.androidx.annotation)
 }
