@@ -60,7 +60,6 @@ val assembleFfmpeg =
                     ndkDir,
                     host,
                     "23",
-					"ape",
                     "flac",
                     "alac",
                 )
