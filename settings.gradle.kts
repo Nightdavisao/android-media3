@@ -23,9 +23,7 @@ pluginManagement {
   }
 }
 
-plugins { id("gradlebuild.media3-settings-logic")
-	id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
-}
+plugins { id("gradlebuild.media3-settings-logic") }
 
 rootProject.name = "androidx-media3"
 
