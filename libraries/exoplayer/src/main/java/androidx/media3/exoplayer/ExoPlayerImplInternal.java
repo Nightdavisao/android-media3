@@ -69,6 +69,7 @@ import androidx.media3.common.util.Util;
 import androidx.media3.datasource.DataSourceException;
 import androidx.media3.exoplayer.DefaultMediaClock.PlaybackParametersListener;
 import androidx.media3.exoplayer.ExoPlayer.CrossfadeConfiguration;
+import androidx.media3.exoplayer.ExoPlayer.CrossfadePlanProvider;
 import androidx.media3.exoplayer.ExoPlayer.PreloadConfiguration;
 import androidx.media3.exoplayer.analytics.AnalyticsCollector;
 import androidx.media3.exoplayer.analytics.PlayerId;
@@ -2843,6 +2844,42 @@ import java.util.Objects;
     maybeUpdatePreloadPeriods(loadingPeriodChanged);
   }
 
+  /**
+   * Returns the crossfade overlap for the transition to {@code nextInfo}, consulting the configured
+   * {@link CrossfadePlanProvider} if present.
+   */
+  private long getDesiredCrossfadeOverlapUs(MediaPeriodInfo nextInfo) {
+    @Nullable CrossfadePlanProvider planProvider = crossfadeConfiguration.planProvider;
+    if (planProvider == null) {
+      return crossfadeConfiguration.durationUs;
+    }
+    @Nullable MediaPeriodHolder loadingPeriod = queue.getLoadingPeriod();
+    if (loadingPeriod == null) {
+      return crossfadeConfiguration.durationUs;
+    }
+    @Nullable MediaItem fromMediaItem = getMediaItem(loadingPeriod.info.id);
+    @Nullable MediaItem toMediaItem = getMediaItem(nextInfo.id);
+    if (fromMediaItem == null || toMediaItem == null) {
+      return crossfadeConfiguration.durationUs;
+    }
+    long overlapUs = planProvider.getCrossfadeOverlapUs(fromMediaItem, toMediaItem);
+    return overlapUs == C.TIME_UNSET ? crossfadeConfiguration.durationUs : overlapUs;
+  }
+
+  @Nullable
+  private MediaItem getMediaItem(MediaPeriodId mediaPeriodId) {
+    Timeline timeline = playbackInfo.timeline;
+    if (timeline.isEmpty()) {
+      return null;
+    }
+    @Nullable
+    Timeline.Period period =
+        timeline.getPeriodByUid(mediaPeriodId.periodUid, new Timeline.Period());
+    return period == null
+        ? null
+        : timeline.getWindow(period.windowIndex, new Timeline.Window()).mediaItem;
+  }
+
   private boolean maybeUpdateLoadingPeriod() throws ExoPlaybackException {
     boolean loadingPeriodChanged = false;
     queue.reevaluateBuffer(rendererPositionUs);
@@ -2850,7 +2887,8 @@ import java.util.Objects;
       @Nullable
       MediaPeriodInfo info = queue.getNextMediaPeriodInfo(rendererPositionUs, playbackInfo);
       if (info != null) {
-        MediaPeriodHolder mediaPeriodHolder = queue.enqueueNextMediaPeriodHolder(info);
+        MediaPeriodHolder mediaPeriodHolder =
+            queue.enqueueNextMediaPeriodHolder(info, getDesiredCrossfadeOverlapUs(info));
         if (!mediaPeriodHolder.prepareCalled) {
           mediaPeriodHolder.prepare(this, info.startPositionUs);
         } else if (mediaPeriodHolder.prepared) {

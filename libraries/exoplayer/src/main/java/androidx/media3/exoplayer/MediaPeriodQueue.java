@@ -204,8 +204,9 @@ import java.util.Objects;
    * Returns how much the start of {@code nextInfo} is moved earlier in renderer time so that it
    * overlaps with the end of {@code current}.
    */
-  private long getCrossfadeOverlapUs(MediaPeriodHolder current, MediaPeriodInfo nextInfo) {
-    if (crossfadeDurationUs <= 0
+  private long getCrossfadeOverlapUs(
+      MediaPeriodHolder current, MediaPeriodInfo nextInfo, long desiredOverlapUs) {
+    if (desiredOverlapUs <= 0
         || repeatMode == Player.REPEAT_MODE_ONE
         || current.info.id.isAd()
         || nextInfo.id.isAd()
@@ -216,11 +217,11 @@ import java.util.Objects;
     long currentDurationUs = current.info.durationUs;
     long nextDurationUs = nextInfo.durationUs;
     if (currentDurationUs == C.TIME_UNSET
-        || currentDurationUs < 2 * crossfadeDurationUs
-        || (nextDurationUs != C.TIME_UNSET && nextDurationUs < 2 * crossfadeDurationUs)) {
+        || desiredOverlapUs > currentDurationUs / 2
+        || (nextDurationUs != C.TIME_UNSET && desiredOverlapUs > nextDurationUs / 2)) {
       return 0;
     }
-    return crossfadeDurationUs;
+    return desiredOverlapUs;
   }
 
   /** Returns whether {@code mediaPeriod} is the current loading media period. */
@@ -276,7 +277,24 @@ import java.util.Objects;
    * @param info Information used to identify this media period in its timeline period.
    */
   public MediaPeriodHolder enqueueNextMediaPeriodHolder(MediaPeriodInfo info) {
-    long crossfadeOverlapUs = loading == null ? 0 : getCrossfadeOverlapUs(loading, info);
+    return enqueueNextMediaPeriodHolder(info, /* desiredCrossfadeOverlapUs= */ crossfadeDurationUs);
+  }
+
+  /**
+   * Enqueues a new media period holder based on the specified information as the new loading media
+   * period, and returns it.
+   *
+   * @param info Information used to identify this media period in its timeline period.
+   * @param desiredCrossfadeOverlapUs How much of this period should start before the previous
+   *     period ends, in microseconds, or a value less than or equal to {@code 0} to disable
+   *     crossfading.
+   */
+  public MediaPeriodHolder enqueueNextMediaPeriodHolder(
+      MediaPeriodInfo info, long desiredCrossfadeOverlapUs) {
+    long crossfadeOverlapUs =
+        loading == null
+            ? 0
+            : getCrossfadeOverlapUs(loading, info, desiredCrossfadeOverlapUs);
     long rendererPositionOffsetUs =
         loading == null
             ? INITIAL_RENDERER_POSITION_OFFSET_US

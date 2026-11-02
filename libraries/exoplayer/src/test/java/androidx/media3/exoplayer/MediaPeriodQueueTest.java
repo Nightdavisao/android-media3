@@ -2572,6 +2572,56 @@ public final class MediaPeriodQueueTest {
         .inOrder();
   }
 
+  @Test
+  public void enqueueNextMediaPeriodHolder_withExplicitCrossfadeOverlap_startsNextPeriodEarly() {
+    long overlapUs = 3 * C.MICROS_PER_SECOND;
+    setupMediaSources(
+        new FakeMediaSource(createTimeline(CONTENT_DURATION_US)),
+        new FakeMediaSource(createTimeline(CONTENT_DURATION_US)));
+
+    enqueueNext(overlapUs);
+    enqueueNext(overlapUs);
+
+    assertThat(mediaPeriodHolderFactoryRendererPositionOffsets)
+        .containsExactly(
+            MediaPeriodQueue.INITIAL_RENDERER_POSITION_OFFSET_US,
+            MediaPeriodQueue.INITIAL_RENDERER_POSITION_OFFSET_US + CONTENT_DURATION_US - overlapUs)
+        .inOrder();
+  }
+
+  @Test
+  public void enqueueNextMediaPeriodHolder_withExplicitOverlapLongerThanHalfPeriod_doesNotOverlap() {
+    long overlapUs = CONTENT_DURATION_US / 2 + 1;
+    setupMediaSources(
+        new FakeMediaSource(createTimeline(CONTENT_DURATION_US)),
+        new FakeMediaSource(createTimeline(CONTENT_DURATION_US)));
+
+    enqueueNext(overlapUs);
+    enqueueNext(overlapUs);
+
+    assertThat(mediaPeriodHolderFactoryRendererPositionOffsets)
+        .containsExactly(
+            MediaPeriodQueue.INITIAL_RENDERER_POSITION_OFFSET_US,
+            MediaPeriodQueue.INITIAL_RENDERER_POSITION_OFFSET_US + CONTENT_DURATION_US)
+        .inOrder();
+  }
+
+  @Test
+  public void enqueueNextMediaPeriodHolder_withExplicitZeroOverlap_doesNotOverlap() {
+    setupMediaSources(
+        new FakeMediaSource(createTimeline(CONTENT_DURATION_US)),
+        new FakeMediaSource(createTimeline(CONTENT_DURATION_US)));
+
+    enqueueNext(/* desiredCrossfadeOverlapUs= */ 0);
+    enqueueNext(/* desiredCrossfadeOverlapUs= */ 0);
+
+    assertThat(mediaPeriodHolderFactoryRendererPositionOffsets)
+        .containsExactly(
+            MediaPeriodQueue.INITIAL_RENDERER_POSITION_OFFSET_US,
+            MediaPeriodQueue.INITIAL_RENDERER_POSITION_OFFSET_US + CONTENT_DURATION_US)
+        .inOrder();
+  }
+
   private void setupAdTimeline(long... adGroupTimesUs) {
     adPlaybackState =
         new AdPlaybackState(/* adsId= */ new Object(), adGroupTimesUs)
@@ -2648,6 +2698,11 @@ public final class MediaPeriodQueueTest {
 
   private void enqueueNext() {
     mediaPeriodQueue.enqueueNextMediaPeriodHolder(getNextMediaPeriodInfo());
+  }
+
+  private void enqueueNext(long desiredCrossfadeOverlapUs) {
+    mediaPeriodQueue.enqueueNextMediaPeriodHolder(
+        getNextMediaPeriodInfo(), desiredCrossfadeOverlapUs);
   }
 
   private void clear() {

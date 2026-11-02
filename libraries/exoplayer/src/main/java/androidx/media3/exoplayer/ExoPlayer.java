@@ -213,6 +213,24 @@ public interface ExoPlayer extends Player {
   }
 
   /**
+   * Provides the crossfade overlap for a transition between two media items.
+   *
+   * <p>Called on the playback thread when the next period is enqueued. Implementations must return
+   * quickly, typically from precomputed analysis, and must not block.
+   */
+  @UnstableApi
+  interface CrossfadePlanProvider {
+
+    /**
+     * Returns how many microseconds before the end of {@code fromMediaItem} the {@code
+     * toMediaItem} should start, or {@link C#TIME_UNSET} to use the configured default duration.
+     *
+     * <p>Return {@code 0} to disable crossfading for this transition.
+     */
+    long getCrossfadeOverlapUs(MediaItem fromMediaItem, MediaItem toMediaItem);
+  }
+
+  /**
    * Configuration for crossfading between consecutive audio items.
    *
    * <p>Crossfading requires a secondary audio {@link Renderer}. See {@link
@@ -229,25 +247,44 @@ public interface ExoPlayer extends Player {
         new CrossfadeConfiguration(/* durationUs= */ C.TIME_UNSET);
 
     /**
-     * The duration of the crossfade in microseconds, or {@link C#TIME_UNSET} to disable
+     * The default duration of the crossfade in microseconds, or {@link C#TIME_UNSET} to disable
      * crossfading.
      */
     public final long durationUs;
 
+    /**
+     * The provider of per-transition crossfade overlaps, or {@code null} to crossfade every
+     * eligible transition for {@link #durationUs}.
+     */
+    @Nullable public final CrossfadePlanProvider planProvider;
+
     /** Creates a configuration with the {@link #DEFAULT_DURATION_US default duration}. */
     public CrossfadeConfiguration() {
-      this(DEFAULT_DURATION_US);
+      this(DEFAULT_DURATION_US, /* planProvider= */ null);
     }
 
     /**
      * Creates a configuration.
      *
-     * @param durationUs The crossfade duration in microseconds, or {@link C#TIME_UNSET} to disable
-     *     crossfading.
+     * @param durationUs The default crossfade duration in microseconds, or {@link C#TIME_UNSET} to
+     *     disable crossfading.
      */
     public CrossfadeConfiguration(long durationUs) {
+      this(durationUs, /* planProvider= */ null);
+    }
+
+    /**
+     * Creates a configuration with a per-transition overlap provider.
+     *
+     * @param durationUs The fallback crossfade duration in microseconds, or {@link C#TIME_UNSET} to
+     *     disable crossfading when the provider returns {@link C#TIME_UNSET}.
+     * @param planProvider The provider of per-transition crossfade overlaps, or {@code null}.
+     */
+    public CrossfadeConfiguration(
+        long durationUs, @Nullable CrossfadePlanProvider planProvider) {
       checkArgument(durationUs == C.TIME_UNSET || durationUs > 0);
       this.durationUs = durationUs;
+      this.planProvider = planProvider;
     }
 
     @Override
@@ -258,12 +295,14 @@ public interface ExoPlayer extends Player {
       if (!(o instanceof CrossfadeConfiguration)) {
         return false;
       }
-      return durationUs == ((CrossfadeConfiguration) o).durationUs;
+      CrossfadeConfiguration that = (CrossfadeConfiguration) o;
+      return durationUs == that.durationUs && planProvider == that.planProvider;
     }
 
     @Override
     public int hashCode() {
-      return (int) (durationUs ^ (durationUs >>> 32));
+      return 31 * (int) (durationUs ^ (durationUs >>> 32))
+          + (planProvider == null ? 0 : planProvider.hashCode());
     }
   }
 
