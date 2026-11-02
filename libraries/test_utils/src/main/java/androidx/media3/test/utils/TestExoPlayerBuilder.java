@@ -62,6 +62,7 @@ public class TestExoPlayerBuilder {
   private boolean deviceVolumeControlEnabled;
   private boolean suppressPlaybackWhenUnsuitableOutput;
   @Nullable private ExoPlayer.PreloadConfiguration preloadConfiguration;
+  @Nullable private ExoPlayer.CrossfadeConfiguration crossfadeConfiguration;
   private boolean dynamicSchedulingEnabled;
   private boolean perStreamMediaProgressionEnabled;
   private int stuckPlayingDetectionTimeoutMs;
@@ -185,6 +186,18 @@ public class TestExoPlayerBuilder {
   public TestExoPlayerBuilder setPreloadConfiguration(
       ExoPlayer.PreloadConfiguration preloadConfiguration) {
     this.preloadConfiguration = preloadConfiguration;
+    return this;
+  }
+
+  /**
+   * Sets the crossfade configuration.
+   *
+   * @see ExoPlayer#setCrossfadeConfiguration(ExoPlayer.CrossfadeConfiguration)
+   */
+  @CanIgnoreReturnValue
+  public TestExoPlayerBuilder setCrossfadeConfiguration(
+      ExoPlayer.CrossfadeConfiguration crossfadeConfiguration) {
+    this.crossfadeConfiguration = crossfadeConfiguration;
     return this;
   }
 
@@ -523,6 +536,9 @@ public class TestExoPlayerBuilder {
     ExoPlayer exoPlayer = builder.build();
     if (preloadConfiguration != null) {
       exoPlayer.setPreloadConfiguration(preloadConfiguration);
+    }
+    if (crossfadeConfiguration != null) {
+      exoPlayer.setCrossfadeConfiguration(crossfadeConfiguration);
     }
     return exoPlayer;
   }

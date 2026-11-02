@@ -1004,6 +1004,18 @@ public class SimpleExoPlayer extends BasePlayer implements ExoPlayer {
   }
 
   @Override
+  public void setCrossfadeConfiguration(CrossfadeConfiguration crossfadeConfiguration) {
+    blockUntilConstructorFinished();
+    player.setCrossfadeConfiguration(crossfadeConfiguration);
+  }
+
+  @Override
+  public CrossfadeConfiguration getCrossfadeConfiguration() {
+    blockUntilConstructorFinished();
+    return player.getCrossfadeConfiguration();
+  }
+
+  @Override
   public void setShuffleModeEnabled(boolean shuffleModeEnabled) {
     blockUntilConstructorFinished();
     player.setShuffleModeEnabled(shuffleModeEnabled);

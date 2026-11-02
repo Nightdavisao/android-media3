@@ -207,6 +207,7 @@ import java.util.function.IntConsumer;
   private SeekParameters seekParameters;
   private ShuffleOrder shuffleOrder;
   private PreloadConfiguration preloadConfiguration;
+  private CrossfadeConfiguration crossfadeConfiguration;
   private boolean pauseAtEndOfMediaItems;
   private boolean enforceAdPlaybackOnTimelineRefresh;
   private Commands availableCommands;
@@ -325,6 +326,7 @@ import java.util.function.IntConsumer;
       mediaSourceHolderSnapshots = new ArrayList<>();
       shuffleOrder = new ShuffleOrder.DefaultShuffleOrder(/* length= */ 0);
       preloadConfiguration = PreloadConfiguration.DEFAULT;
+      crossfadeConfiguration = builder.crossfadeConfiguration;
       emptyTrackSelectorResult =
           new TrackSelectorResult(
               new RendererConfiguration[renderers.length],
@@ -400,6 +402,7 @@ import java.util.function.IntConsumer;
               playerId,
               builder.playbackLooperProvider,
               preloadConfiguration,
+              crossfadeConfiguration,
               frameMetadataListener,
               builder.enforceAdPlaybackOnTimelineRefresh);
       Looper playbackLooper = internalPlayer.getPlaybackLooper();
@@ -942,6 +945,21 @@ import java.util.function.IntConsumer;
   @Override
   public PreloadConfiguration getPreloadConfiguration() {
     return preloadConfiguration;
+  }
+
+  @Override
+  public void setCrossfadeConfiguration(CrossfadeConfiguration crossfadeConfiguration) {
+    verifyApplicationThread();
+    if (this.crossfadeConfiguration.equals(crossfadeConfiguration)) {
+      return;
+    }
+    this.crossfadeConfiguration = crossfadeConfiguration;
+    internalPlayer.setCrossfadeConfiguration(crossfadeConfiguration);
+  }
+
+  @Override
+  public CrossfadeConfiguration getCrossfadeConfiguration() {
+    return crossfadeConfiguration;
   }
 
   @Override

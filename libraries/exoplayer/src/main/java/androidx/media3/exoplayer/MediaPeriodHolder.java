@@ -88,6 +88,7 @@ import java.io.IOException;
   private TrackGroupArray trackGroups;
   private TrackSelectorResult trackSelectorResult;
   private long rendererPositionOffsetUs;
+  private long crossfadeOverlapUs;
 
   /**
    * Creates a new holder with information required to play it as part of a timeline.
@@ -162,6 +163,22 @@ import java.io.IOException;
   /** Returns start position of period in renderer time. */
   public long getStartPositionRendererTime() {
     return info.startPositionUs + rendererPositionOffsetUs;
+  }
+
+  /**
+   * Sets how much of this period's start is played before the previous period ends, in
+   * microseconds.
+   */
+  public void setCrossfadeOverlapUs(long crossfadeOverlapUs) {
+    this.crossfadeOverlapUs = crossfadeOverlapUs;
+  }
+
+  /**
+   * Returns how much of this period's start is played before the previous period ends, in
+   * microseconds.
+   */
+  public long getCrossfadeOverlapUs() {
+    return crossfadeOverlapUs;
   }
 
   /** Returns whether the period is fully buffered. */

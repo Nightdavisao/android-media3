@@ -137,6 +137,7 @@ public final class MediaPeriodQueueTest {
                   /* usesStreamPrerollFlags= */ false);
             },
             PreloadConfiguration.DEFAULT,
+            /* crossfadeDurationUs= */ C.TIME_UNSET,
             /* rendererCount= */ 1);
     mediaSourceList =
         new MediaSourceList(
@@ -1509,6 +1510,7 @@ public final class MediaPeriodQueueTest {
                   /* usesStreamPrerollFlags= */ false);
             },
             PreloadConfiguration.DEFAULT,
+            /* crossfadeDurationUs= */ C.TIME_UNSET,
             2);
     long offset = MediaPeriodQueue.INITIAL_RENDERER_POSITION_OFFSET_US;
     FakeMediaSource sourceA = new FakeMediaSource(createTimeline(30 * C.MICROS_PER_SECOND));
@@ -2528,6 +2530,45 @@ public final class MediaPeriodQueueTest {
 
     assertThat(mediaPeriodHolderFactoryRendererPositionOffsets)
         .containsExactly(1_000_000_000_000L, 1_000_010_000_000L)
+        .inOrder();
+  }
+
+  @Test
+  public void enqueueNextMediaPeriodHolder_withCrossfade_startsNextPeriodEarly() {
+    long crossfadeDurationUs = 2 * C.MICROS_PER_SECOND;
+    mediaPeriodQueue.updateCrossfadeDuration(crossfadeDurationUs);
+    setupMediaSources(
+        new FakeMediaSource(createTimeline(CONTENT_DURATION_US)),
+        new FakeMediaSource(createTimeline(CONTENT_DURATION_US)));
+
+    enqueueNext();
+    enqueueNext();
+
+    assertThat(mediaPeriodHolderFactoryRendererPositionOffsets)
+        .containsExactly(
+            MediaPeriodQueue.INITIAL_RENDERER_POSITION_OFFSET_US,
+            MediaPeriodQueue.INITIAL_RENDERER_POSITION_OFFSET_US
+                + CONTENT_DURATION_US
+                - crossfadeDurationUs)
+        .inOrder();
+  }
+
+  @Test
+  public void enqueueNextMediaPeriodHolder_withCrossfadeAndShortPeriod_doesNotOverlap() {
+    long crossfadeDurationUs = 2 * C.MICROS_PER_SECOND;
+    long shortDurationUs = 3 * C.MICROS_PER_SECOND;
+    mediaPeriodQueue.updateCrossfadeDuration(crossfadeDurationUs);
+    setupMediaSources(
+        new FakeMediaSource(createTimeline(shortDurationUs)),
+        new FakeMediaSource(createTimeline(shortDurationUs)));
+
+    enqueueNext();
+    enqueueNext();
+
+    assertThat(mediaPeriodHolderFactoryRendererPositionOffsets)
+        .containsExactly(
+            MediaPeriodQueue.INITIAL_RENDERER_POSITION_OFFSET_US,
+            MediaPeriodQueue.INITIAL_RENDERER_POSITION_OFFSET_US + shortDurationUs)
         .inOrder();
   }
 

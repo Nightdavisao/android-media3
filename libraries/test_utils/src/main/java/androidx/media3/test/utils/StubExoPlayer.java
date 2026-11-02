@@ -123,6 +123,16 @@ public class StubExoPlayer extends StubPlayer implements ExoPlayer {
   }
 
   @Override
+  public void setCrossfadeConfiguration(CrossfadeConfiguration crossfadeConfiguration) {
+    throw new UnsupportedOperationException();
+  }
+
+  @Override
+  public CrossfadeConfiguration getCrossfadeConfiguration() {
+    throw new UnsupportedOperationException();
+  }
+
+  @Override
   public void setMediaSource(MediaSource mediaSource) {
     throw new UnsupportedOperationException();
   }

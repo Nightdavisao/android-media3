@@ -26,6 +26,7 @@ import androidx.annotation.IntDef;
 import androidx.annotation.Nullable;
 import androidx.media3.common.AdPlaybackState;
 import androidx.media3.common.C;
+import androidx.media3.common.Player;
 import androidx.media3.common.Player.RepeatMode;
 import androidx.media3.common.Timeline;
 import androidx.media3.common.Timeline.Period;
@@ -106,6 +107,7 @@ import java.util.Objects;
   @Nullable private MediaPeriodHolder loading;
   @Nullable private MediaPeriodHolder preloading;
   private int length;
+  private long crossfadeDurationUs;
   @Nullable private Object oldFrontPeriodUid;
   private long oldFrontPeriodWindowSequenceNumber;
   private List<MediaPeriodHolder> preloadPriorityList;
@@ -118,6 +120,8 @@ import java.util.Objects;
    *     on.
    * @param mediaPeriodHolderFactory A {@link MediaPeriodHolder.Factory} to create holders.
    * @param preloadConfiguration A {@link PreloadConfiguration} for preloading playlist items.
+   * @param crossfadeDurationUs The crossfade duration in microseconds, or {@link C#TIME_UNSET} to
+   *     disable crossfading.
    * @param rendererCount Number of {@link Renderer renderers} in use by the player.
    */
   public MediaPeriodQueue(
@@ -125,11 +129,13 @@ import java.util.Objects;
       HandlerWrapper analyticsCollectorHandler,
       MediaPeriodHolder.Factory mediaPeriodHolderFactory,
       PreloadConfiguration preloadConfiguration,
+      long crossfadeDurationUs,
       int rendererCount) {
     this.analyticsCollector = analyticsCollector;
     this.analyticsCollectorHandler = analyticsCollectorHandler;
     this.mediaPeriodHolderFactory = mediaPeriodHolderFactory;
     this.preloadConfiguration = preloadConfiguration;
+    this.crossfadeDurationUs = crossfadeDurationUs == C.TIME_UNSET ? 0 : crossfadeDurationUs;
     period = new Timeline.Period();
     window = new Timeline.Window();
     preloadPriorityList = new ArrayList<>();
@@ -182,6 +188,39 @@ import java.util.Objects;
       Timeline timeline, PreloadConfiguration preloadConfiguration) {
     this.preloadConfiguration = preloadConfiguration;
     invalidatePreloadPool(timeline);
+  }
+
+  /**
+   * Updates the crossfade duration. The new duration applies to periods enqueued after this call.
+   *
+   * @param durationUs The crossfade duration in microseconds, or {@link C#TIME_UNSET} to disable
+   *     crossfading.
+   */
+  public void updateCrossfadeDuration(long durationUs) {
+    this.crossfadeDurationUs = durationUs == C.TIME_UNSET ? 0 : durationUs;
+  }
+
+  /**
+   * Returns how much the start of {@code nextInfo} is moved earlier in renderer time so that it
+   * overlaps with the end of {@code current}.
+   */
+  private long getCrossfadeOverlapUs(MediaPeriodHolder current, MediaPeriodInfo nextInfo) {
+    if (crossfadeDurationUs <= 0
+        || repeatMode == Player.REPEAT_MODE_ONE
+        || current.info.id.isAd()
+        || nextInfo.id.isAd()
+        || current.info.id.windowSequenceNumber == nextInfo.id.windowSequenceNumber
+        || current.info.id.periodUid.equals(nextInfo.id.periodUid)) {
+      return 0;
+    }
+    long currentDurationUs = current.info.durationUs;
+    long nextDurationUs = nextInfo.durationUs;
+    if (currentDurationUs == C.TIME_UNSET
+        || currentDurationUs < 2 * crossfadeDurationUs
+        || (nextDurationUs != C.TIME_UNSET && nextDurationUs < 2 * crossfadeDurationUs)) {
+      return 0;
+    }
+    return crossfadeDurationUs;
   }
 
   /** Returns whether {@code mediaPeriod} is the current loading media period. */
@@ -237,10 +276,14 @@ import java.util.Objects;
    * @param info Information used to identify this media period in its timeline period.
    */
   public MediaPeriodHolder enqueueNextMediaPeriodHolder(MediaPeriodInfo info) {
+    long crossfadeOverlapUs = loading == null ? 0 : getCrossfadeOverlapUs(loading, info);
     long rendererPositionOffsetUs =
         loading == null
             ? INITIAL_RENDERER_POSITION_OFFSET_US
-            : (loading.getRendererOffset() + loading.info.durationUs - info.startPositionUs);
+            : (loading.getRendererOffset()
+                + loading.info.durationUs
+                - info.startPositionUs
+                - crossfadeOverlapUs);
     @Nullable MediaPeriodHolder newPeriodHolder = removePreloadedMediaPeriodHolder(info);
     if (newPeriodHolder == null) {
       newPeriodHolder = mediaPeriodHolderFactory.create(info, rendererPositionOffsetUs);
@@ -248,6 +291,7 @@ import java.util.Objects;
       newPeriodHolder.info = info;
       newPeriodHolder.setRendererOffset(rendererPositionOffsetUs);
     }
+    newPeriodHolder.setCrossfadeOverlapUs(crossfadeOverlapUs);
     if (loading != null) {
       loading.setNext(newPeriodHolder);
     } else {

@@ -68,7 +68,9 @@ import androidx.media3.test.utils.TestExoPlayerBuilder;
 import androidx.media3.test.utils.robolectric.ShadowMediaCodecConfig;
 import androidx.test.core.app.ApplicationProvider;
 import com.google.common.collect.ImmutableList;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -143,6 +145,37 @@ public class ExoPlayerWithPrewarmingRenderersTest {
     assertThat(secondaryVideoState1).isEqualTo(Renderer.STATE_ENABLED);
     assertThat(videoState2).isEqualTo(Renderer.STATE_DISABLED);
     assertThat(secondaryVideoState2).isEqualTo(Renderer.STATE_STARTED);
+  }
+
+  @Test
+  public void play_withCrossfade_startsSecondaryAudioRendererAndFadesIn() throws Exception {
+    Clock fakeClock = new FakeClock(/* isAutoAdvancing= */ true);
+    List<Float> secondaryVolumes = Collections.synchronizedList(new ArrayList<>());
+    ExoPlayer player =
+        new TestExoPlayerBuilder(context)
+            .setClock(fakeClock)
+            .setRenderersFactory(
+                new FakeRenderersFactorySupportingSecondaryAudioRenderer(
+                    fakeClock, secondaryVolumes))
+            .setPerStreamMediaProgressionEnabled(perStreamMediaProgressionEnabled)
+            .setCrossfadeConfiguration(
+                new ExoPlayer.CrossfadeConfiguration(/* durationUs= */ 2 * C.MICROS_PER_SECOND))
+            .build();
+    player.setMediaSources(
+        ImmutableList.of(
+            new FakeMediaSource(new FakeTimeline(), ExoPlayerTestRunner.AUDIO_FORMAT),
+            new FakeMediaSource(new FakeTimeline(), ExoPlayerTestRunner.AUDIO_FORMAT)));
+    player.prepare();
+    player.play();
+
+    advance(player)
+        .untilBackgroundThreadCondition(
+            () -> secondaryVolumes.stream().anyMatch(volume -> volume > 0f && volume < 1f));
+    @Renderer.State
+    int secondaryAudioState = player.getSecondaryRenderer(/* index= */ 1).getState();
+    player.release();
+
+    assertThat(secondaryAudioState).isEqualTo(Renderer.STATE_STARTED);
   }
 
   @Test
@@ -2024,6 +2057,59 @@ public class ExoPlayerWithPrewarmingRenderersTest {
           };
         }
       };
+    }
+  }
+
+  private static class FakeRenderersFactorySupportingSecondaryAudioRenderer
+      implements RenderersFactory {
+    private final Clock clock;
+    private final List<Float> secondaryVolumes;
+
+    FakeRenderersFactorySupportingSecondaryAudioRenderer(
+        Clock clock, List<Float> secondaryVolumes) {
+      this.clock = clock;
+      this.secondaryVolumes = secondaryVolumes;
+    }
+
+    @Override
+    public Renderer[] createRenderers(
+        Handler eventHandler,
+        VideoRendererEventListener videoRendererEventListener,
+        AudioRendererEventListener audioRendererEventListener,
+        TextOutput textRendererOutput,
+        MetadataOutput metadataRendererOutput) {
+      HandlerWrapper clockAwareHandler =
+          clock.createHandler(eventHandler.getLooper(), /* callback= */ null);
+      return new Renderer[] {
+        new FakeVideoRenderer(clockAwareHandler, videoRendererEventListener),
+        new FakeAudioRenderer(clockAwareHandler, audioRendererEventListener)
+      };
+    }
+
+    @Override
+    public Renderer createSecondaryRenderer(
+        Renderer renderer,
+        Handler eventHandler,
+        VideoRendererEventListener videoRendererEventListener,
+        AudioRendererEventListener audioRendererEventListener,
+        TextOutput textRendererOutput,
+        MetadataOutput metadataRendererOutput) {
+      if (renderer instanceof FakeAudioRenderer) {
+        return new FakeAudioRenderer(
+            clock.createHandler(eventHandler.getLooper(), /* callback= */ null),
+            audioRendererEventListener) {
+          @Override
+          public void handleMessage(
+              @Renderer.MessageType int messageType, @Nullable Object message)
+              throws ExoPlaybackException {
+            if (messageType == Renderer.MSG_SET_VOLUME && message instanceof Float) {
+              secondaryVolumes.add((Float) message);
+            }
+            super.handleMessage(messageType, message);
+          }
+        };
+      }
+      return null;
     }
   }
 

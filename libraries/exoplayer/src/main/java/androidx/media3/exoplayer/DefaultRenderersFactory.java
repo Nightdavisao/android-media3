@@ -124,6 +124,7 @@ public class DefaultRenderersFactory implements RenderersFactory {
   private boolean enableFloatOutput;
   private boolean enableAudioOutputPlaybackParameters;
   private boolean enableMediaCodecVideoRendererPrewarming;
+  private boolean enableMediaCodecAudioRendererPrewarming;
   private boolean parseAv1SampleDependencies;
   private long lateThresholdToDropDecoderInputUs;
   private long videoRendererEarlySchedulingThresholdUs;
@@ -309,6 +310,31 @@ public class DefaultRenderersFactory implements RenderersFactory {
   public final DefaultRenderersFactory experimentalSetEnableMediaCodecVideoRendererPrewarming(
       boolean enableMediaCodecVideoRendererPrewarming) {
     this.enableMediaCodecVideoRendererPrewarming = enableMediaCodecVideoRendererPrewarming;
+    return this;
+  }
+
+  /**
+   * Sets whether a secondary {@link MediaCodecAudioRenderer} will be created through {@link
+   * #buildSecondaryAudioRenderer} for use by {@link ExoPlayer} for crossfading between audio items.
+   *
+   * <p>This is required for {@link ExoPlayer.CrossfadeConfiguration} to take effect.
+   *
+   * <p>If {@link #buildAudioRenderers} is overridden to provide custom audio renderers, then to
+   * still enable crossfading, {@link #buildSecondaryAudioRenderer} must also be overridden to
+   * provide matching secondary custom audio renderers.
+   *
+   * <p>This method is experimental. Its default value may change, or it may be renamed or removed
+   * in a future release.
+   *
+   * @param enableMediaCodecAudioRendererPrewarming Whether to enable {@link
+   *     #buildSecondaryAudioRenderer} to provide a secondary {@link MediaCodecAudioRenderer}.
+   * @return This factory, for convenience.
+   */
+  @CanIgnoreReturnValue
+  @ExperimentalApi
+  public final DefaultRenderersFactory experimentalSetEnableMediaCodecAudioRendererPrewarming(
+      boolean enableMediaCodecAudioRendererPrewarming) {
+    this.enableMediaCodecAudioRendererPrewarming = enableMediaCodecAudioRendererPrewarming;
     return this;
   }
 
@@ -962,8 +988,58 @@ public class DefaultRenderersFactory implements RenderersFactory {
           eventHandler,
           videoRendererEventListener,
           allowedVideoJoiningTimeMs);
+    } else if (renderer.getTrackType() == C.TRACK_TYPE_AUDIO) {
+      return buildSecondaryAudioRenderer(
+          renderer,
+          context,
+          mediaCodecSelector,
+          enableDecoderFallback,
+          eventHandler,
+          audioRendererEventListener);
     }
     return null;
+  }
+
+  /**
+   * Builds a secondary audio renderer for an {@link ExoPlayer} instance to use for crossfading.
+   *
+   * <p>The created secondary audio {@code Renderer} should match its primary {@link Renderer} in
+   * reported track type support and {@link RendererCapabilities}.
+   *
+   * @param renderer The primary {@link Renderer} for which to create the secondary.
+   * @param context The {@link Context} associated with the player.
+   * @param mediaCodecSelector A decoder selector.
+   * @param enableDecoderFallback Whether to enable fallback to lower-priority decoders.
+   * @param eventHandler A handler associated with the main thread's looper.
+   * @param eventListener An event listener.
+   * @return The created secondary {@link Renderer renderer instance}, or {@code null}.
+   */
+  @Nullable
+  protected Renderer buildSecondaryAudioRenderer(
+      Renderer renderer,
+      Context context,
+      MediaCodecSelector mediaCodecSelector,
+      boolean enableDecoderFallback,
+      Handler eventHandler,
+      AudioRendererEventListener eventListener) {
+    if (!enableMediaCodecAudioRendererPrewarming
+        || renderer.getClass() != MediaCodecAudioRenderer.class) {
+      return null;
+    }
+    @Nullable
+    AudioSink audioSink =
+        buildAudioSink(context, enableFloatOutput, enableAudioOutputPlaybackParameters);
+    if (audioSink == null) {
+      return null;
+    }
+    return new MediaCodecAudioRenderer(
+        context,
+        getCodecAdapterFactory(),
+        mediaCodecSelector,
+        enableDecoderFallback,
+        eventHandler,
+        eventListener,
+        audioSink);
   }
 
   /**

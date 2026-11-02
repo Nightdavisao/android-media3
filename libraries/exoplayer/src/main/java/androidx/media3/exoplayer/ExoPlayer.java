@@ -213,6 +213,61 @@ public interface ExoPlayer extends Player {
   }
 
   /**
+   * Configuration for crossfading between consecutive audio items.
+   *
+   * <p>Crossfading requires a secondary audio {@link Renderer}. See {@link
+   * DefaultRenderersFactory#experimentalSetEnableMediaCodecAudioRendererPrewarming(boolean)}.
+   */
+  @UnstableApi
+  final class CrossfadeConfiguration {
+
+    /** Default crossfade duration used by {@link #CrossfadeConfiguration()}. */
+    public static final long DEFAULT_DURATION_US = 6 * C.MICROS_PER_SECOND;
+
+    /** Crossfade configuration that disables crossfading. */
+    public static final CrossfadeConfiguration OFF =
+        new CrossfadeConfiguration(/* durationUs= */ C.TIME_UNSET);
+
+    /**
+     * The duration of the crossfade in microseconds, or {@link C#TIME_UNSET} to disable
+     * crossfading.
+     */
+    public final long durationUs;
+
+    /** Creates a configuration with the {@link #DEFAULT_DURATION_US default duration}. */
+    public CrossfadeConfiguration() {
+      this(DEFAULT_DURATION_US);
+    }
+
+    /**
+     * Creates a configuration.
+     *
+     * @param durationUs The crossfade duration in microseconds, or {@link C#TIME_UNSET} to disable
+     *     crossfading.
+     */
+    public CrossfadeConfiguration(long durationUs) {
+      checkArgument(durationUs == C.TIME_UNSET || durationUs > 0);
+      this.durationUs = durationUs;
+    }
+
+    @Override
+    public boolean equals(@Nullable Object o) {
+      if (this == o) {
+        return true;
+      }
+      if (!(o instanceof CrossfadeConfiguration)) {
+        return false;
+      }
+      return durationUs == ((CrossfadeConfiguration) o).durationUs;
+    }
+
+    @Override
+    public int hashCode() {
+      return (int) (durationUs ^ (durationUs >>> 32));
+    }
+  }
+
+  /**
    * A builder for {@link ExoPlayer} instances.
    *
    * <p>See {@link #Builder(Context)} for the list of default values.
@@ -305,6 +360,7 @@ public interface ExoPlayer extends Player {
     /* package */ SuitableOutputChecker suitableOutputChecker;
     /* package */ boolean enforceAdPlaybackOnTimelineRefresh;
     /* package */ boolean perStreamMediaProgressionEnabled;
+    /* package */ CrossfadeConfiguration crossfadeConfiguration;
 
     /**
      * Creates a builder.
@@ -537,6 +593,7 @@ public interface ExoPlayer extends Player {
       suitableOutputChecker = new DefaultSuitableOutputChecker();
       dynamicSchedulingEnabled = true;
       enforceAdPlaybackOnTimelineRefresh = true;
+      crossfadeConfiguration = CrossfadeConfiguration.OFF;
     }
 
     /**
@@ -1178,6 +1235,23 @@ public interface ExoPlayer extends Player {
     }
 
     /**
+     * Sets the {@linkplain CrossfadeConfiguration crossfade configuration}.
+     *
+     * <p>The default is {@link CrossfadeConfiguration#OFF}.
+     *
+     * @param crossfadeConfiguration The crossfade configuration.
+     * @return This builder.
+     * @throws IllegalStateException If {@link #build()} has already been called.
+     */
+    @CanIgnoreReturnValue
+    @UnstableApi
+    public Builder setCrossfadeConfiguration(CrossfadeConfiguration crossfadeConfiguration) {
+      checkState(!buildCalled);
+      this.crossfadeConfiguration = crossfadeConfiguration;
+      return this;
+    }
+
+    /**
      * Sets whether to enforce ad playback when the timeline is refreshed by a source update.
      *
      * <p>If {@code true}, then an ad group resolved at or before the current playback position
@@ -1654,6 +1728,20 @@ public interface ExoPlayer extends Player {
   /** Returns the {@linkplain PreloadConfiguration preload configuration}. */
   @UnstableApi
   PreloadConfiguration getPreloadConfiguration();
+
+  /**
+   * Sets the {@linkplain CrossfadeConfiguration crossfade configuration}.
+   *
+   * <p>The new configuration applies to transitions that are enqueued after this call.
+   *
+   * @param crossfadeConfiguration The crossfade configuration.
+   */
+  @UnstableApi
+  void setCrossfadeConfiguration(CrossfadeConfiguration crossfadeConfiguration);
+
+  /** Returns the {@linkplain CrossfadeConfiguration crossfade configuration}. */
+  @UnstableApi
+  CrossfadeConfiguration getCrossfadeConfiguration();
 
   /**
    * {@inheritDoc}

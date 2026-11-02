@@ -60,6 +60,9 @@ import java.util.Objects;
   private @RendererPrewarmingState int prewarmingState;
   private boolean primaryRequiresReset;
   private boolean secondaryRequiresReset;
+  private float volume;
+  private float primaryGain;
+  private float secondaryGain;
 
   public RendererHolder(Renderer renderer, @Nullable Renderer secondaryRenderer, int index) {
     this.primaryRenderer = renderer;
@@ -68,6 +71,9 @@ import java.util.Objects;
     prewarmingState = RENDERER_PREWARMING_STATE_NOT_PREWARMING_USING_PRIMARY;
     primaryRequiresReset = false;
     secondaryRequiresReset = false;
+    volume = 1f;
+    primaryGain = 1f;
+    secondaryGain = 1f;
   }
 
   public boolean hasSecondary() {
@@ -540,7 +546,9 @@ import java.util.Objects;
           startPositionUs,
           offsetUs,
           mediaPeriodId);
-      mediaClock.onRendererEnabled(primaryRenderer);
+      if (!isPrimaryRendererPrewarming()) {
+        mediaClock.onRendererEnabled(primaryRenderer);
+      }
     } else {
       secondaryRequiresReset = true;
       checkNotNull(secondaryRenderer)
@@ -554,7 +562,11 @@ import java.util.Objects;
               startPositionUs,
               offsetUs,
               mediaPeriodId);
-      mediaClock.onRendererEnabled(secondaryRenderer);
+      // Don't register the pre-warming renderer's media clock. Only one renderer can provide the
+      // clock, and the renderer being pre-warmed takes over when the active renderer is disabled.
+      if (!isSecondaryRendererPrewarming()) {
+        mediaClock.onRendererEnabled(checkNotNull(secondaryRenderer));
+      }
     }
   }
 
@@ -719,6 +731,23 @@ import java.util.Objects;
     mediaClock.onRendererDisabled(renderer);
     ensureStopped(renderer);
     renderer.disable();
+    if (renderer == primaryRenderer
+        && secondaryRenderer != null
+        && isRendererEnabled(secondaryRenderer)) {
+      // The pre-warmed renderer becomes the clock source when the active renderer ends.
+      try {
+        mediaClock.onRendererEnabled(secondaryRenderer);
+      } catch (ExoPlaybackException e) {
+        Log.e(TAG, "Failed to switch media clock to the pre-warmed renderer.", e);
+      }
+    } else if (renderer == secondaryRenderer
+        && isRendererEnabled(primaryRenderer)) {
+      try {
+        mediaClock.onRendererEnabled(primaryRenderer);
+      } catch (ExoPlaybackException e) {
+        Log.e(TAG, "Failed to switch media clock to the pre-warmed renderer.", e);
+      }
+    }
   }
 
   /**
@@ -897,9 +926,63 @@ import java.util.Objects;
     if (getTrackType() != TRACK_TYPE_AUDIO) {
       return;
     }
-    primaryRenderer.handleMessage(Renderer.MSG_SET_VOLUME, volume);
+    this.volume = volume;
+    applyVolume();
+  }
+
+  private void applyVolume() throws ExoPlaybackException {
+    primaryRenderer.handleMessage(Renderer.MSG_SET_VOLUME, volume * primaryGain);
     if (secondaryRenderer != null) {
-      secondaryRenderer.handleMessage(Renderer.MSG_SET_VOLUME, volume);
+      secondaryRenderer.handleMessage(Renderer.MSG_SET_VOLUME, volume * secondaryGain);
+    }
+  }
+
+  /** Resets any crossfade gain to unity. */
+  public void resetCrossfadeGain() throws ExoPlaybackException {
+    if (primaryGain == 1f && secondaryGain == 1f) {
+      return;
+    }
+    primaryGain = 1f;
+    secondaryGain = 1f;
+    applyVolume();
+  }
+
+  /**
+   * Applies crossfade gains for the given progress.
+   *
+   * <p>Progress {@code 0} is the start of the fade, in which the incoming renderer is silent, and
+   * {@code 1} is the end, in which the outgoing renderer is silent.
+   *
+   * @param progress The fade progress from 0 to 1.
+   */
+  public void setCrossfadeProgress(float progress) throws ExoPlaybackException {
+    if (getTrackType() != TRACK_TYPE_AUDIO) {
+      return;
+    }
+    // Approximates the perceptually linear logarithmic fade-in and exponential fade-out.
+    float fadeIn = progress * progress;
+    float fadeOut = (1f - progress) * (1f - progress);
+    boolean secondaryIsIncoming = isSecondaryRendererPrewarming();
+    float newPrimaryGain = secondaryIsIncoming ? fadeOut : fadeIn;
+    float newSecondaryGain = secondaryIsIncoming ? fadeIn : fadeOut;
+    if (newPrimaryGain == primaryGain && newSecondaryGain == secondaryGain) {
+      return;
+    }
+    primaryGain = newPrimaryGain;
+    secondaryGain = newSecondaryGain;
+    applyVolume();
+  }
+
+  /** Starts the renderer that is pre-warming, if it is enabled but not started yet. */
+  public void startPrewarmingRenderer() throws ExoPlaybackException {
+    if (secondaryRenderer != null && isSecondaryRendererPrewarming()) {
+      if (isRendererEnabled(secondaryRenderer) && secondaryRenderer.getState() == STATE_ENABLED) {
+        secondaryRenderer.start();
+      }
+    } else if (isPrimaryRendererPrewarming()
+        && isRendererEnabled(primaryRenderer)
+        && primaryRenderer.getState() == STATE_ENABLED) {
+      primaryRenderer.start();
     }
   }
 

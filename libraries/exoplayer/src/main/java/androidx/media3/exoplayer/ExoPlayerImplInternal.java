@@ -68,6 +68,7 @@ import androidx.media3.common.util.TraceUtil;
 import androidx.media3.common.util.Util;
 import androidx.media3.datasource.DataSourceException;
 import androidx.media3.exoplayer.DefaultMediaClock.PlaybackParametersListener;
+import androidx.media3.exoplayer.ExoPlayer.CrossfadeConfiguration;
 import androidx.media3.exoplayer.ExoPlayer.PreloadConfiguration;
 import androidx.media3.exoplayer.analytics.AnalyticsCollector;
 import androidx.media3.exoplayer.analytics.PlayerId;
@@ -190,6 +191,7 @@ import java.util.Objects;
   private static final int MSG_SET_SCRUBBING_MODE_PARAMETERS = 38;
   private static final int MSG_SET_IMAGE_METADATA_LISTENER = 39;
   private static final int MSG_SET_AUDIO_SESSION_ID = 40;
+  private static final int MSG_SET_CROSSFADE_CONFIGURATION = 41;
 
   private static final long BUFFERING_MAXIMUM_INTERVAL_MS =
       Util.usToMs(Renderer.DEFAULT_DURATION_TO_PROGRESS_US);
@@ -242,6 +244,7 @@ import java.util.Objects;
   private final AnalyticsCollector analyticsCollector;
   private final HandlerWrapper applicationLooperHandler;
   private final boolean hasSecondaryRenderers;
+  private final boolean hasSecondaryAudioRenderer;
   private final AudioFocusManager audioFocusManager;
   private boolean enforceAdPlaybackOnTimelineRefresh;
   private SeekParameters seekParameters;
@@ -274,6 +277,7 @@ import java.util.Objects;
   private long setForegroundModeTimeoutMs;
   private long playbackMaybeBecameStuckAtMs;
   private PreloadConfiguration preloadConfiguration;
+  private CrossfadeConfiguration crossfadeConfiguration;
   private Timeline lastPreloadPoolInvalidationTimeline;
   private long prewarmingMediaPeriodDiscontinuity = C.TIME_UNSET;
   private boolean isPrewarmingDisabledUntilNextTransition;
@@ -302,6 +306,7 @@ import java.util.Objects;
       PlayerId playerId,
       @Nullable PlaybackLooperProvider playbackLooperProvider,
       PreloadConfiguration preloadConfiguration,
+      CrossfadeConfiguration crossfadeConfiguration,
       VideoFrameMetadataListener videoFrameMetadataListener,
       boolean enforceAdPlaybackOnTimelineRefresh) {
     this.playbackInfoUpdateListener = playbackInfoUpdateListener;
@@ -320,6 +325,7 @@ import java.util.Objects;
     this.clock = clock;
     this.playerId = playerId;
     this.preloadConfiguration = preloadConfiguration;
+    this.crossfadeConfiguration = crossfadeConfiguration;
     this.analyticsCollector = analyticsCollector;
     this.volume = 1f;
     this.scrubbingModeParameters = ScrubbingModeParameters.DEFAULT;
@@ -340,6 +346,7 @@ import java.util.Objects;
         trackSelector.getRendererCapabilitiesListener();
 
     boolean hasSecondaryRenderers = false;
+    boolean hasSecondaryAudioRenderer = false;
     this.renderers = new RendererHolder[renderers.length];
     for (int i = 0; i < renderers.length; i++) {
       renderers[i].init(/* index= */ i, playerId, clock);
@@ -350,10 +357,15 @@ import java.util.Objects;
       if (secondaryRenderers[i] != null) {
         secondaryRenderers[i].init(/* index= */ i, playerId, clock);
         hasSecondaryRenderers = true;
+        hasSecondaryAudioRenderer |= renderers[i].getTrackType() == C.TRACK_TYPE_AUDIO;
       }
       this.renderers[i] = new RendererHolder(renderers[i], secondaryRenderers[i], /* index= */ i);
     }
     this.hasSecondaryRenderers = hasSecondaryRenderers;
+    this.hasSecondaryAudioRenderer = hasSecondaryAudioRenderer;
+    if (!hasSecondaryAudioRenderer) {
+      this.crossfadeConfiguration = CrossfadeConfiguration.OFF;
+    }
 
     mediaClock = new DefaultMediaClock(this, clock);
     pendingMessages = new ArrayList<>();
@@ -370,6 +382,7 @@ import java.util.Objects;
             applicationLooperHandler,
             this::createMediaPeriodHolder,
             preloadConfiguration,
+            this.crossfadeConfiguration.durationUs,
             renderers.length);
     mediaSourceList =
         new MediaSourceList(
@@ -463,6 +476,10 @@ import java.util.Objects;
 
   public void setPreloadConfiguration(PreloadConfiguration preloadConfiguration) {
     handler.obtainMessage(MSG_SET_PRELOAD_CONFIGURATION, preloadConfiguration).sendToTarget();
+  }
+
+  public void setCrossfadeConfiguration(CrossfadeConfiguration crossfadeConfiguration) {
+    handler.obtainMessage(MSG_SET_CROSSFADE_CONFIGURATION, crossfadeConfiguration).sendToTarget();
   }
 
   public void seekTo(Timeline timeline, int windowIndex, long positionUs) {
@@ -760,6 +777,9 @@ import java.util.Objects;
           break;
         case MSG_SET_PRELOAD_CONFIGURATION:
           setPreloadConfigurationInternal((PreloadConfiguration) msg.obj);
+          break;
+        case MSG_SET_CROSSFADE_CONFIGURATION:
+          setCrossfadeConfigurationInternal((CrossfadeConfiguration) msg.obj);
           break;
         case MSG_DO_SOME_WORK:
           doSomeWork();
@@ -1155,6 +1175,48 @@ import java.util.Objects;
     }
   }
 
+  /**
+   * Applies crossfade gains while an audio renderer is pre-warming the next period. The fade window
+   * runs from the pre-warmed period's start until the current period's end.
+   */
+  private void updateCrossfadeVolumes() throws ExoPlaybackException {
+    @Nullable MediaPeriodHolder playingPeriod = queue.getPlayingPeriod();
+    for (int i = 0; i < renderers.length; i++) {
+      RendererHolder renderer = renderers[i];
+      if (renderer.getTrackType() != C.TRACK_TYPE_AUDIO || !renderer.isPrewarming()) {
+        renderer.resetCrossfadeGain();
+        continue;
+      }
+      @Nullable MediaPeriodHolder prewarmingPeriod = queue.getPrewarmingPeriod(i);
+      if (playingPeriod == null
+          || prewarmingPeriod == null
+          || playingPeriod.info.durationUs == C.TIME_UNSET
+          || !renderer.isPrewarmingPeriod(prewarmingPeriod)) {
+        renderer.resetCrossfadeGain();
+        continue;
+      }
+      long overlapUs =
+          playingPeriod.getStartPositionRendererTime() + playingPeriod.info.durationUs
+              - prewarmingPeriod.getStartPositionRendererTime();
+      if (overlapUs <= 0) {
+        renderer.resetCrossfadeGain();
+        continue;
+      }
+      float progress =
+          (rendererPositionUs - prewarmingPeriod.getStartPositionRendererTime())
+              / (float) overlapUs;
+      if (progress < 0) {
+        // Pre-warming has been enabled, but the fade has not started yet.
+        renderer.resetCrossfadeGain();
+        continue;
+      }
+      if (shouldPlayWhenReady()) {
+        renderer.startPrewarmingRenderer();
+      }
+      renderer.setCrossfadeProgress(min(progress, 1f));
+    }
+  }
+
   private void setAudioSessionIdInternal(int audioSessionId) throws ExoPlaybackException {
     for (RendererHolder renderer : renderers) {
       renderer.setAudioSessionId(audioSessionId);
@@ -1299,6 +1361,19 @@ import java.util.Objects;
   private void setPreloadConfigurationInternal(PreloadConfiguration preloadConfiguration) {
     this.preloadConfiguration = preloadConfiguration;
     queue.updatePreloadConfiguration(playbackInfo.timeline, preloadConfiguration);
+  }
+
+  private void setCrossfadeConfigurationInternal(
+      CrossfadeConfiguration crossfadeConfiguration) throws ExoPlaybackException {
+    this.crossfadeConfiguration =
+        hasSecondaryAudioRenderer ? crossfadeConfiguration : CrossfadeConfiguration.OFF;
+    queue.updateCrossfadeDuration(this.crossfadeConfiguration.durationUs);
+    if (areRenderersPrewarming()) {
+      disableAndResetPrewarmingRenderers();
+    }
+    for (RendererHolder renderer : renderers) {
+      renderer.resetCrossfadeGain();
+    }
   }
 
   private void seekToCurrentPosition(boolean sendDiscontinuity) throws ExoPlaybackException {
@@ -1467,6 +1542,8 @@ import java.util.Objects;
     TraceUtil.beginSection("doSomeWork");
 
     updatePlaybackPositions();
+
+    updateCrossfadeVolumes();
 
     boolean renderersEnded = true;
     boolean renderersAllowPlayback = true;
@@ -3304,6 +3381,12 @@ import java.util.Objects;
       }
       isPrewarmingDisabledUntilNextTransition = false;
       MediaPeriodHolder newPlayingPeriodHolder = checkNotNull(queue.advancePlayingPeriod());
+      // When the new period was crossfaded in, its start is earlier in renderer time and part of it
+      // has already played. Report the position actually reached.
+      long newPositionUs =
+          max(
+              newPlayingPeriodHolder.info.startPositionUs,
+              newPlayingPeriodHolder.toPeriodTime(rendererPositionUs));
       boolean isCancelledSSAIAdTransition =
           playbackInfo.periodId.periodUid.equals(newPlayingPeriodHolder.info.id.periodUid)
               && playbackInfo.periodId.adGroupIndex == C.INDEX_UNSET
@@ -3313,9 +3396,9 @@ import java.util.Objects;
       playbackInfo =
           handlePositionDiscontinuity(
               newPlayingPeriodHolder.info.id,
-              newPlayingPeriodHolder.info.startPositionUs,
+              newPositionUs,
               newPlayingPeriodHolder.info.requestedContentPositionUs,
-              /* discontinuityStartPositionUs= */ newPlayingPeriodHolder.info.startPositionUs,
+              /* discontinuityStartPositionUs= */ newPositionUs,
               /* reportDiscontinuity= */ !isCancelledSSAIAdTransition,
               Player.DISCONTINUITY_REASON_AUTO_TRANSITION);
       resetPendingPauseAtEndOfPeriod();
@@ -3399,8 +3482,12 @@ import java.util.Objects;
       return false;
     }
     MediaPeriodHolder nextPlayingPeriodHolder = playingPeriodHolder.getNext();
+    // A crossfaded period starts before the playing period ends, but the playing period is only
+    // advanced once the previous period has actually played to its end.
     return nextPlayingPeriodHolder != null
-        && rendererPositionUs >= nextPlayingPeriodHolder.getStartPositionRendererTime()
+        && rendererPositionUs
+            >= nextPlayingPeriodHolder.getStartPositionRendererTime()
+                + nextPlayingPeriodHolder.getCrossfadeOverlapUs()
         && areAllRenderersInCorrectState(nextPlayingPeriodHolder);
   }
 
